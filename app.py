@@ -36,14 +36,17 @@ st.set_page_config(
     page_title="AI Nurse - Orsini Clinical Assistant",
     page_icon="🩺",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ---------------------------------------------------------------------------
-# Custom CSS for clinical styling
+# Custom CSS for clinical styling (hides sidebar completely)
 # ---------------------------------------------------------------------------
 st.markdown("""
 <style>
+    [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] {
+        display: none !important;
+    }
     .main-title {
         font-size: 2.1rem;
         font-weight: 700;
@@ -83,54 +86,24 @@ DEFAULT_SAMPLE_DICTATION = (
 nlp = MedicalNLP()
 
 
-def render_sidebar() -> tuple[str, str | None]:
-    """Renders sidebar controls for model selection and credentials."""
-    st.sidebar.image("https://img.icons8.com/color/96/nurse-female.png", width=64)
-    st.sidebar.title("AI Nurse Controls")
-
-    # Detect API Key from environment or Streamlit Cloud Secrets
-    gemini_key_env = os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "")
-    if not gemini_key_env:
-        try:
-            if "GEMINI_API_KEY" in st.secrets:
-                gemini_key_env = st.secrets["GEMINI_API_KEY"]
-                os.environ["GEMINI_API_KEY"] = gemini_key_env
-            elif "GOOGLE_API_KEY" in st.secrets:
-                gemini_key_env = st.secrets["GOOGLE_API_KEY"]
-                os.environ["GOOGLE_API_KEY"] = gemini_key_env
-        except Exception:
-            pass
-    has_gemini = bool(gemini_key_env)
-
-    mode_options = [
-        "Google Gemini 3.6 Flash (Free Live AI)",
-        "Clinical Simulation (Demo Mode)",
-    ]
-    default_idx = 0 if has_gemini else 1
-
-    mode = st.sidebar.radio(
-        "AI Engine Provider",
-        options=mode_options,
-        index=default_idx,
-        help="Choose between Google Gemini live multimodal AI or the offline clinical simulation engine.",
-    )
-
-    user_api_key = None
-    if mode.startswith("Google Gemini"):
-        st.sidebar.success("Google Gemini 3.6 Flash Active & Ready")
-    else:
-        st.sidebar.info("Simulation Mode: Running 100% offline without API key.")
-
-    st.sidebar.markdown("---")
-    st.sidebar.caption("Form Standard: **Orsini Adult Form N-01-C17**")
-    st.sidebar.caption("Output Format: **Identical 4-Page Official PDF**")
-
-    return mode, user_api_key
-
-
 def main() -> None:
     """Streamlit Application Entry Point."""
-    mode, user_api_key = render_sidebar()
+    # Detect API Key from environment or Streamlit Cloud Secrets
+    gemini_key = os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "")
+    if not gemini_key:
+        try:
+            if "GEMINI_API_KEY" in st.secrets:
+                gemini_key = st.secrets["GEMINI_API_KEY"]
+                os.environ["GEMINI_API_KEY"] = gemini_key
+            elif "GOOGLE_API_KEY" in st.secrets:
+                gemini_key = st.secrets["GOOGLE_API_KEY"]
+                os.environ["GOOGLE_API_KEY"] = gemini_key
+        except Exception:
+            pass
+
+    provider_choice = "gemini" if gemini_key else "mock"
+    user_api_key = gemini_key or None
+    gen = NoteGenerator(provider=provider_choice, api_key=user_api_key)
 
     pdf_processor = PDFProcessor()
     blank_template_path = PROJECT_ROOT / "templates" / "orsini_blank_template.pdf"
@@ -147,9 +120,6 @@ def main() -> None:
         '3. AI auto-fills & downloads the completed official 4-page Orsini PDF</div>',
         unsafe_allow_html=True,
     )
-
-    provider_choice = "gemini" if mode.startswith("Google Gemini") else "mock"
-    gen = NoteGenerator(provider=provider_choice, api_key=user_api_key)
 
     # -----------------------------------------------------------------------
     # Step 1: Upload Blank PDF & Step 2: Nurse Spoken Dictation
