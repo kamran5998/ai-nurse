@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.dist/
+
+# Virtual Environments
+venv/
+env/
+ENV/
+.venv/
+
+# Environment Variables & Secrets
+.env
+.env.local
+.streamlit/secrets.toml
+
+# Testing & IDEs
+.pytest_cache/
+.coverage
+htmlcov/
+.vscode/
+.idea/
+
+# User-uploaded / temporary generated files
+uploaded_*.pdf
+test_*.pdf
+recorded_nurse_mic.wav
+output_*.pdf
