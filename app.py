@@ -40,37 +40,144 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------------
-# Custom CSS for clinical styling (hides sidebar completely)
+# Custom CSS for Premium Modern Dark Clinical Styling
 # ---------------------------------------------------------------------------
 st.markdown("""
 <style>
-    [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] {
+    /* Completely hide sidebar and collapse toggle */
+    [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"] {
         display: none !important;
     }
+
+    /* Page container limits and padding */
+    .block-container {
+        padding-top: 2rem !important;
+        padding-bottom: 3.5rem !important;
+        max-width: 1240px !important;
+    }
+
+    /* Radiant Title */
     .main-title {
-        font-size: 2.1rem;
-        font-weight: 700;
-        color: #1E3A8A;
-        margin-bottom: 0.2rem;
+        font-size: 2.3rem !important;
+        font-weight: 800 !important;
+        background: linear-gradient(135deg, #60A5FA 0%, #A78BFA 50%, #38BDF8 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 0.35rem !important;
+        letter-spacing: -0.025em;
     }
+
     .sub-title {
-        font-size: 1.0rem;
-        color: #4B5563;
-        margin-bottom: 1.2rem;
+        font-size: 1.02rem !important;
+        color: #94A3B8 !important;
+        margin-bottom: 1.8rem !important;
+        line-height: 1.6;
     }
-    .metric-container {
-        background: #F8FAFC;
-        border: 1px solid #E2E8F0;
-        border-radius: 8px;
-        padding: 12px 16px;
-        margin-bottom: 12px;
+
+    /* Sleek Dark Frosted Cards for Step 1 & Step 2 */
+    div[data-testid="column"] > div {
+        background: rgba(21, 29, 47, 0.75);
+        border: 1px solid rgba(59, 130, 246, 0.22);
+        border-radius: 14px;
+        padding: 1.6rem 1.5rem;
+        box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(14px);
+        transition: all 0.25s ease;
     }
+
+    div[data-testid="column"] > div:hover {
+        border-color: rgba(99, 102, 241, 0.45);
+        box-shadow: 0 12px 35px -8px rgba(37, 99, 235, 0.3);
+    }
+
+    /* Headers inside Step Cards */
+    h4 {
+        color: #F8FAFC !important;
+        font-weight: 700 !important;
+        font-size: 1.18rem !important;
+        letter-spacing: -0.01em;
+        margin-bottom: 0.4rem !important;
+    }
+
+    /* Captions */
+    .stCaption, [data-testid="stCaptionContainer"] {
+        color: #64748B !important;
+        font-size: 0.88rem !important;
+    }
+
+    /* Primary Action Button: Glowing Blue-Indigo Gradient */
+    button[kind="primary"] {
+        background: linear-gradient(135deg, #2563EB 0%, #7C3AED 100%) !important;
+        color: #FFFFFF !important;
+        border: 1px solid rgba(255, 255, 255, 0.2) !important;
+        border-radius: 10px !important;
+        padding: 0.75rem 1.6rem !important;
+        font-weight: 600 !important;
+        font-size: 1.05rem !important;
+        box-shadow: 0 4px 22px rgba(99, 102, 241, 0.45) !important;
+        transition: all 0.25s ease !important;
+    }
+
+    button[kind="primary"]:hover {
+        background: linear-gradient(135deg, #1D4ED8 0%, #6D28D9 100%) !important;
+        box-shadow: 0 6px 30px rgba(99, 102, 241, 0.65) !important;
+        transform: translateY(-2px);
+    }
+
+    /* Secondary Buttons: Dark Slate with subtle border */
+    button[kind="secondary"] {
+        background: rgba(30, 41, 59, 0.85) !important;
+        color: #E2E8F0 !important;
+        border: 1px solid #334155 !important;
+        border-radius: 9px !important;
+        font-weight: 500 !important;
+        transition: all 0.2s ease !important;
+    }
+
+    button[kind="secondary"]:hover {
+        background: rgba(51, 65, 85, 0.95) !important;
+        border-color: #60A5FA !important;
+        color: #FFFFFF !important;
+    }
+
+    /* File Uploader Box */
+    [data-testid="stFileUploader"] {
+        background: rgba(15, 23, 42, 0.55);
+        border: 1px dashed rgba(99, 102, 241, 0.35);
+        border-radius: 10px;
+        padding: 0.5rem;
+    }
+
+    /* Tabs Styling */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
+        background-color: transparent;
+        border-bottom: 1px solid #1E293B;
+        padding-bottom: 4px;
     }
+
     .stTabs [data-baseweb="tab"] {
-        padding: 8px 16px;
-        border-radius: 6px 6px 0 0;
+        padding: 10px 18px;
+        border-radius: 8px 8px 0 0;
+        color: #94A3B8;
+        font-weight: 500;
+        background-color: transparent;
+        border: none;
+        transition: all 0.2s ease;
+    }
+
+    .stTabs [aria-selected="true"] {
+        color: #60A5FA !important;
+        background-color: rgba(37, 99, 235, 0.15) !important;
+        border-bottom: 2px solid #60A5FA !important;
+        font-weight: 600;
+    }
+
+    /* Alerts and Badges */
+    .stAlert {
+        border-radius: 10px;
+        background-color: rgba(15, 23, 42, 0.85) !important;
+        border: 1px solid rgba(59, 130, 246, 0.3) !important;
     }
 </style>
 """, unsafe_allow_html=True)
