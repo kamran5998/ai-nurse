@@ -32,5 +32,44 @@ class TestAccuracyPipeline(unittest.TestCase):
         previews = filler.render_preview_images(pdf_bytes)
         self.assertEqual(len(previews), 4)
 
+    def test_zero_fallback_when_only_patient_name_provided(self):
+        """Verifies that dictating ONLY patient name produces NO fallback mock data anywhere."""
+        import fitz
+        gen = NoteGenerator(provider='mock')
+        note = gen.generate_mock("patient name john abraham")
+
+        # Clinical note verification: only patient name is present
+        self.assertEqual(note['patient_name'], 'John Abraham')
+        self.assertEqual(note['drug_name'], '')
+        self.assertEqual(note['vitals_bp'], '')
+        self.assertEqual(note['pump_brand_model'], '')
+        self.assertEqual(note['infusion_table'], [])
+        self.assertEqual(note['vitals_flow_sheet'], [])
+        self.assertEqual(note['clinician_signature'], '')
+        self.assertFalse(note['standard_precautions_maintained'])
+
+        # Merger verification: no default fallback injection
+        merged = merge_clinical_data({}, note)
+        self.assertEqual(merged['patient_name'], 'John Abraham')
+        self.assertEqual(merged['drug_name'], '')
+        self.assertEqual(merged['vitals_bp'], '')
+        self.assertEqual(merged['infusion_table'], [])
+
+        # PDF Filler verification: only patient name is stamped, no fake data
+        filler = OrsiniPDFFiller('templates/orsini_blank_template.pdf')
+        pdf_bytes = filler.fill_form(note)
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+
+        all_text = " ".join(page.get_text() for page in doc)
+        self.assertIn("John Abraham", all_text)
+        self.assertNotIn("Evkeeza", all_text)
+        self.assertNotIn("118/74", all_text)
+        self.assertNotIn("107/66", all_text)
+        self.assertNotIn("Baxter", all_text)
+        self.assertNotIn("Curlin", all_text)
+        self.assertNotIn("Hilario", all_text)
+        self.assertNotIn("Jane Doe", all_text)
+        doc.close()
+
 if __name__ == '__main__':
     unittest.main()

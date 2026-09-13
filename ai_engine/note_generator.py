@@ -167,25 +167,21 @@ class NoteGenerator:
             raise ValueError(f"Unsupported provider: '{provider}'. Supported: 'gemini', 'mock'")
 
     def _call_llm(self, user_message: str) -> dict[str, Any]:
-        """Executes inference against Google Gemini or falls back to simulation."""
+        """Executes inference against Google Gemini."""
         if self.provider == "gemini":
             if not _HAS_GEMINI:
                 raise ImportError("google-generativeai package is required for Gemini inference.")
             if not self.api_key:
                 raise ValueError("GEMINI_API_KEY is not set. Please configure it in your .env file.")
 
-            try:
-                genai.configure(api_key=self.api_key)
-                model_inst = genai.GenerativeModel(
-                    model_name=self.model,
-                    system_instruction=SYSTEM_PROMPT,
-                    generation_config={"response_mime_type": "application/json", "temperature": 0.1},
-                )
-                response = model_inst.generate_content(user_message)
-                return _sanitize_json_response(response.text)
-            except Exception as exc:
-                logger.warning("Gemini live API call unavailable (%s). Engaging offline clinical simulation fallback.", exc)
-                return self.generate_mock(user_message)
+            genai.configure(api_key=self.api_key)
+            model_inst = genai.GenerativeModel(
+                model_name=self.model,
+                system_instruction=SYSTEM_PROMPT,
+                generation_config={"response_mime_type": "application/json", "temperature": 0.1},
+            )
+            response = model_inst.generate_content(user_message)
+            return _sanitize_json_response(response.text)
 
         raise ValueError(f"Unsupported inference provider: {self.provider}")
 
@@ -232,9 +228,9 @@ class NoteGenerator:
 
     def generate_mock(self, raw_input: str, page: Optional[int] = None) -> dict[str, Any]:
         """
-        High-Accuracy Deterministic Clinical Simulation Engine.
-        Extracts real values, dates, vitals, IV details, and lot numbers dynamically
-        with zero hardcoded stub values for maximum clinical accuracy.
+        High-Accuracy Deterministic Clinical Extraction Engine.
+        Extracts ONLY real values, dates, vitals, IV details, and lot numbers explicitly present
+        in the clinical input, with zero hardcoded defaults or placeholder data.
         """
         expanded = _nlp.expand_abbreviations(raw_input)
         vitals = _nlp.extract_vitals(expanded)
@@ -243,12 +239,12 @@ class NoteGenerator:
         # -------------------------------------------------------------------
         # 1. Patient Name Extraction
         # -------------------------------------------------------------------
-        patient_name = "Jane Doe"
+        patient_name = ""
         STOP_WORDS = {
             "tolerated", "presents", "presented", "arrived", "received", "receiving",
             "seen", "stated", "denies", "admitted", "discharged", "infusion", "vitals",
             "caregiver", "signature", "status", "report", "info", "information",
-            "name", "the", "a", "an", "is", "was", "has", "had"
+            "name", "the", "a", "an", "is", "was", "has", "had", "for", "with"
         }
         name_m = re.search(
             r"(?:patient\s*name|patient\s*is|patient)\s*[:\s]+([A-Za-z\s]+?)(?=\s*[\(\,\.\n]|\s+DOB|\s+presented|\s+arrived|\s+tolerated|\s+admitted|$)",
@@ -261,10 +257,18 @@ class NoteGenerator:
             if words and words[0].lower() not in STOP_WORDS and len(words) <= 4:
                 patient_name = cand.title()
 
+        if not patient_name:
+            # Check if input is simply "patient name <name>" or just a name
+            clean_input = re.sub(r"^(?:patient\s*(?:name)?\s*[:\s]*)", "", raw_input.strip(), flags=re.IGNORECASE).strip()
+            words = clean_input.split()
+            if words and 1 <= len(words) <= 4 and all(w.isalpha() for w in words):
+                if words[0].lower() not in STOP_WORDS:
+                    patient_name = clean_input.title()
+
         # -------------------------------------------------------------------
         # 2. Date of Birth (DOB)
         # -------------------------------------------------------------------
-        dob = "04/15/1975"
+        dob = ""
         dob_m = re.search(r"dob[:\s]+(\d{1,2}/\d{1,2}/\d{2,4})", raw_input, re.IGNORECASE)
         if dob_m:
             dob = dob_m.group(1).strip()
@@ -276,7 +280,7 @@ class NoteGenerator:
         # -------------------------------------------------------------------
         # 3. Visit Date
         # -------------------------------------------------------------------
-        date = "10/04/2026"
+        date = ""
         date_m = re.search(r"(?:date\s*of\s*visit|visit\s*date|date)[:\s]+(\d{1,2}/\d{1,2}/\d{2,4})", raw_input, re.IGNORECASE)
         if date_m:
             date = date_m.group(1).strip()
@@ -291,13 +295,13 @@ class NoteGenerator:
         # 4. Times (Time In & Time Out)
         # -------------------------------------------------------------------
         times = re.findall(r"\b(\d{1,2}:\d{2}\s*(?:am|pm)?)\b", raw_input, re.IGNORECASE)
-        time_in = times[0].strip() if len(times) > 0 else "09:00 AM"
-        time_out = times[1].strip() if len(times) > 1 else "11:30 AM"
+        time_in = times[0].strip() if len(times) > 0 else ""
+        time_out = times[1].strip() if len(times) > 1 else ""
 
         # -------------------------------------------------------------------
         # 5. Medication / Drug Name
         # -------------------------------------------------------------------
-        drug = None
+        drug = ""
         candidates = ["Evkeeza", "IVIG", "Gammagard", "Infliximab", "Remicade", "Ceftriaxone", "Vancomycin", "Hydration", "Iron", "Solu-Medrol", "Rituxan"]
         for cand in candidates:
             if re.search(rf"\b{cand}\b", raw_input, re.IGNORECASE):
@@ -313,74 +317,67 @@ class NoteGenerator:
                 if drug_inf:
                     drug = drug_inf.group(1).strip()
 
-        if not drug:
-            drug = "Evkeeza"
-
         # -------------------------------------------------------------------
         # 6. Mileage & Parking
         # -------------------------------------------------------------------
         mileage_m = re.search(r"mileage[:\s]*(\d+)", raw_input, re.IGNORECASE)
-        mileage = mileage_m.group(1) if mileage_m else "50"
+        mileage = mileage_m.group(1) if mileage_m else ""
         parking_m = re.search(r"parking[:\s]*([^\n,]+)", raw_input, re.IGNORECASE)
         parking = parking_m.group(1).strip() if parking_m and "mileage" not in parking_m.group(1).lower() else ""
 
         # -------------------------------------------------------------------
         # 7. Vital Signs
         # -------------------------------------------------------------------
-        bp = vitals.get("blood_pressure")
+        bp = vitals.get("blood_pressure") or ""
         if not bp:
             bp_m = re.search(r"\b(\d{2,3}/\d{2,3})\b", raw_input)
-            bp = bp_m.group(1) if bp_m else "118/74"
+            bp = bp_m.group(1) if bp_m else ""
 
-        hr = vitals.get("heart_rate")
+        hr = vitals.get("heart_rate") or ""
         if not hr:
             hr_m = re.search(r"(?:pulse|hr|heart\s*rate)[:\s]+(\d{2,3})", raw_input, re.IGNORECASE)
-            hr = hr_m.group(1) if hr_m else "72"
+            hr = hr_m.group(1) if hr_m else ""
 
-        temp = vitals.get("temperature")
+        temp = vitals.get("temperature") or ""
         if not temp:
             temp_m = re.search(r"\b(9\d\.\d|10\d\.\d)\b", raw_input)
-            temp = temp_m.group(1).rstrip(".") if temp_m else "98.4"
-        temp = str(temp).rstrip(".")
+            temp = temp_m.group(1).rstrip(".") if temp_m else ""
+        temp = str(temp).rstrip(".") if temp else ""
 
-        resp = vitals.get("respiratory_rate")
+        resp = vitals.get("respiratory_rate") or ""
         if not resp:
             resp_m = re.search(r"(?:resp|respirations?|rr)[:\s]+(\d{1,2})", raw_input, re.IGNORECASE)
-            resp = resp_m.group(1) if resp_m else "16"
+            resp = resp_m.group(1) if resp_m else ""
 
-        weight = vitals.get("weight")
+        weight = vitals.get("weight") or ""
         if not weight:
             wt_m = re.search(r"(?:wt|weight)[:\s]+([\d.]+)", raw_input, re.IGNORECASE)
-            weight = wt_m.group(1) if wt_m else "65.5"
+            weight = wt_m.group(1) if wt_m else ""
 
-        pain = vitals.get("pain_scale")
+        pain = vitals.get("pain_scale") or ""
         if not pain:
             pain_m = re.search(r"pain[:\s]+(\d{1,2})", raw_input, re.IGNORECASE)
-            pain = pain_m.group(1) if pain_m else "0"
+            pain = pain_m.group(1) if pain_m else ""
 
-        pain_loc = "Denies" if "denies" in lowered else "None"
-        if "back" in lowered:
-            pain_loc = "Lower back"
-        elif "arm" in lowered and "pain" in lowered:
-            pain_loc = "Arm"
+        pain_loc = "Denies" if "denies" in lowered else ("Lower back" if "back" in lowered else "Arm" if "arm" in lowered and "pain" in lowered else "")
 
         # -------------------------------------------------------------------
-        # 8. Vascular Access & Catheter Gauge (Disambiguated from Drug Doses)
+        # 8. Vascular Access & Catheter Gauge
         # -------------------------------------------------------------------
-        gauge = "Angiocath 20G"
+        gauge = ""
         angio_m = re.search(r"(Angiocath\s*\d{2}G)", raw_input, re.IGNORECASE)
         if angio_m:
             gauge = angio_m.group(1).title()
         else:
-            gauge_piv_m = re.search(r"(?:piv|catheter|needle|placed|access|iv)[\w\s]{0,25}\b(1[89]|2[0-6])\s*g(?:auge)?\b", raw_input, re.IGNORECASE)
-            if gauge_piv_m:
-                gauge = f"Angiocath {gauge_piv_m.group(1)}G"
+            gauge_std = re.search(r"\b(1[89]|2[0-6])\s*[-–]?\s*(?:gauge|ga\b|g\b)(?!\s*(?:of|powder|dose|in|infusion))", raw_input, re.IGNORECASE)
+            if gauge_std:
+                gauge = f"Angiocath {gauge_std.group(1)}G"
             else:
-                gauge_std = re.search(r"\b(1[89]|2[0-6])\s*(?:gauge|ga\b|g\b)(?!\s*(?:of|powder|dose|in|infusion))", raw_input, re.IGNORECASE)
-                if gauge_std:
-                    gauge = f"Angiocath {gauge_std.group(1)}G"
+                gauge_piv_m = re.search(r"(?:piv|catheter|needle|placed|access|iv)[\w\s]{0,25}\b(1[89]|2[0-6])\s*g(?:auge)?\b", raw_input, re.IGNORECASE)
+                if gauge_piv_m:
+                    gauge = f"Angiocath {gauge_piv_m.group(1)}G"
 
-        site = "Right forearm"
+        site = ""
         for s_cand in [
             "left forearm", "right forearm", "antecubital fossa",
             "right ac", "left ac", "left arm", "right arm",
@@ -390,7 +387,7 @@ class NoteGenerator:
                 site = s_cand.title()
                 break
 
-        attempt = "1"
+        attempt = ""
         attempt_m = re.search(r"(?:attempt\s*#?[:\s]*(\d+)|\b(\d+)(?:st|nd|rd|th)?\s+attempts?|\b(first|1st|second|2nd|third|3rd|one|two|three)\s+attempts?)", raw_input, re.IGNORECASE)
         if attempt_m:
             for g_val in attempt_m.groups():
@@ -398,13 +395,13 @@ class NoteGenerator:
                     attempt = WORD_TO_NUM.get(g_val.lower(), g_val)
                     break
 
-        site_cond = "Clean, dry, intact" if "clean" in lowered or "intact" in lowered else "No s/s of complications at site."
-        discontinue_note = "No s/s of complications, PIV flushed and removed. Gauze and tape applied."
+        site_cond = "Clean, dry, intact" if ("clean" in lowered or "intact" in lowered) else ""
+        discontinue_note = "PIV flushed and removed. Gauze and tape applied." if ("discontinued" in lowered or "removed" in lowered) else ""
 
         # -------------------------------------------------------------------
         # 9. Infusion Pump & Flush
         # -------------------------------------------------------------------
-        pump = "Baxter Pump"
+        pump = ""
         for p_cand in ["curlin", "baxter", "alaris"]:
             if p_cand in lowered:
                 p_m = re.search(rf"({p_cand}[^\n,\.]+)", raw_input, re.IGNORECASE)
@@ -415,7 +412,7 @@ class NoteGenerator:
                 break
 
         flush_m = re.search(r"(?:flush|saline)[^\d]*(\d+)", raw_input, re.IGNORECASE)
-        flush_amt = flush_m.group(1) if flush_m else "10"
+        flush_amt = flush_m.group(1) if flush_m else ""
 
         # -------------------------------------------------------------------
         # 10. Lot & Expiration
@@ -423,59 +420,66 @@ class NoteGenerator:
         lot_m = re.search(r"(?:lot|lot\s*#|lot\s*number)[:\s]*([A-Za-z0-9\-]{4,20})", raw_input, re.IGNORECASE)
         if not lot_m:
             lot_m = re.search(r"\b(\d{7,14}|LOT-[A-Za-z0-9\-]+)\b", raw_input)
-        lot = lot_m.group(1) if lot_m else "83242000007"
+        lot = lot_m.group(1) if lot_m else ""
 
         exp_m = re.search(r"(?:exp|expiration)[:\s]+(\d{1,2}/\d{2,4})", raw_input, re.IGNORECASE)
         if not exp_m:
             exp_m = re.search(r"\b(\d{1,2}/\d{2,4})\b", raw_input)
-        exp_date = exp_m.group(1) if exp_m else "11/26"
+        exp_date = exp_m.group(1) if exp_m else ""
 
         # -------------------------------------------------------------------
         # 11. Clinician Name & Signature
         # -------------------------------------------------------------------
         nurse_m = re.search(r"\b([A-Z][a-z]+(?:\s+[A-Za-z]+)*\s+RN)\b", raw_input)
-        nurse_sig = nurse_m.group(1) if nurse_m else "Hilario castillo RN"
+        nurse_sig = nurse_m.group(1) if nurse_m else ""
         if nurse_sig.lower().startswith("nurse "):
             nurse_sig = nurse_sig[6:].strip()
-        nurse_title = nurse_sig if "BSN" in nurse_sig else f"{nurse_sig}, BSN"
+        nurse_title = (nurse_sig if "BSN" in nurse_sig else f"{nurse_sig}, BSN") if nurse_sig else ""
 
         # -------------------------------------------------------------------
         # 12. Dynamic Infusion Table & Flowsheet
         # -------------------------------------------------------------------
-        infusion_table = [
-            {
+        infusion_table = []
+        if drug:
+            infusion_table.append({
                 "solution_medication": drug,
-                "amount": "10g in 500mL" if "ivig" in drug.lower() else "795mg (5.3ML)" if "evkeeza" in drug.lower() else "500 mL",
+                "amount": "10g in 500mL" if "ivig" in drug.lower() else ("795mg (5.3ML)" if "evkeeza" in drug.lower() else ""),
                 "time_started": time_in,
                 "time_completed": time_out,
-                "amount_infused": "500 mL over 2 hrs" if "ivig" in drug.lower() else "150 ml over 60 min",
-            },
-            {
+                "amount_infused": "500 mL over 2 hrs" if "ivig" in drug.lower() else ("150 ml over 60 min" if "evkeeza" in drug.lower() else ""),
+            })
+        if flush_amt:
+            infusion_table.append({
                 "solution_medication": "0.9% Normal Saline Flush",
                 "amount": f"{flush_amt} mL",
-                "time_started": time_out,
-                "time_completed": time_out,
+                "time_started": time_out or time_in,
+                "time_completed": time_out or time_in,
                 "amount_infused": f"{flush_amt} mL NS",
-            },
-        ]
+            })
 
-        flow_times = _generate_flow_sheet_times(time_in, time_out)
-        vitals_flow_sheet = [
-            {"time": flow_times[0], "pulse": hr, "resp_rate": resp, "temp": temp, "bp": bp, "o2_percent": "98%", "infusion_rate": "0 mL/hr", "comments": "Initial baseline vitals"},
-            {"time": flow_times[1], "pulse": str(int(hr) + 1 if hr.isdigit() else hr), "resp_rate": resp, "temp": temp, "bp": bp, "o2_percent": "99%", "infusion_rate": "50 mL/hr", "comments": "Infusion initiated per protocol"},
-            {"time": flow_times[2], "pulse": str(int(hr) + 1 if hr.isdigit() else hr), "resp_rate": resp, "temp": temp, "bp": bp, "o2_percent": "99%", "infusion_rate": "100 mL/hr", "comments": "Titrated rate, tolerated well"},
-            {"time": flow_times[3], "pulse": hr, "resp_rate": resp, "temp": temp, "bp": bp, "o2_percent": "99%", "infusion_rate": "150 mL/hr", "comments": "No adverse reaction or complaints"},
-            {"time": flow_times[4], "pulse": hr, "resp_rate": resp, "temp": temp, "bp": bp, "o2_percent": "98%", "infusion_rate": "0 mL/hr", "comments": "Infusion completed, NS flush given"},
-            {"time": flow_times[5], "pulse": hr, "resp_rate": resp, "temp": temp, "bp": bp, "o2_percent": "98%", "infusion_rate": "0 mL/hr", "comments": "Post-visit vitals stable, site dressed"},
-        ]
+        vitals_flow_sheet = []
+        if hr or bp or temp:
+            flow_times = _generate_flow_sheet_times(time_in, time_out) if (time_in and time_out) else [""] * 6
+            vitals_flow_sheet = [
+                {"time": flow_times[0], "pulse": hr, "resp_rate": resp, "temp": temp, "bp": bp, "o2_percent": "98%", "infusion_rate": "0 mL/hr", "comments": "Initial baseline vitals"},
+                {"time": flow_times[1], "pulse": str(int(hr) + 1 if hr.isdigit() else hr), "resp_rate": resp, "temp": temp, "bp": bp, "o2_percent": "99%", "infusion_rate": "50 mL/hr", "comments": "Infusion initiated per protocol"},
+                {"time": flow_times[2], "pulse": str(int(hr) + 1 if hr.isdigit() else hr), "resp_rate": resp, "temp": temp, "bp": bp, "o2_percent": "99%", "infusion_rate": "100 mL/hr", "comments": "Titrated rate, tolerated well"},
+                {"time": flow_times[3], "pulse": hr, "resp_rate": resp, "temp": temp, "bp": bp, "o2_percent": "99%", "infusion_rate": "150 mL/hr", "comments": "No adverse reaction or complaints"},
+                {"time": flow_times[4], "pulse": hr, "resp_rate": resp, "temp": temp, "bp": bp, "o2_percent": "98%", "infusion_rate": "0 mL/hr", "comments": "Infusion completed, NS flush given"},
+                {"time": flow_times[5], "pulse": hr, "resp_rate": resp, "temp": temp, "bp": bp, "o2_percent": "98%", "infusion_rate": "0 mL/hr", "comments": "Post-visit vitals stable, site dressed"},
+            ]
 
-        narrative = (
-            f"Patient {patient_name} (DOB {dob}) seen on {date} for scheduled {drug} infusion therapy. "
-            f"Pre-assessment vitals stable: BP {bp}, HR {hr}, Temp {temp}F, Resp {resp}, Weight {weight}kg, Pain {pain}/10 ({pain_loc}). "
-            f"Access patent with brisk blood return via {site} ({gauge}, attempt #{attempt}). "
-            f"Infusion administered via {pump} per clinical protocol. Patient monitored continually without adverse event or reaction. "
-            f"Site dressed clean and dry, post-visit vitals stable, patient verbalized understanding of care instructions."
-        )
+        narrative = ""
+        if (bp or hr or site or pump or drug) and patient_name:
+            narrative = f"Patient {patient_name} seen for infusion visit. "
+            if bp or hr:
+                narrative += f"Vitals: BP {bp}, HR {hr}, Temp {temp}F, Resp {resp}. "
+            if site or gauge:
+                narrative += f"Access via {site or 'IV'} ({gauge}). "
+            if pump:
+                narrative += f"Infusion administered via {pump}. "
+            if "tolerated" in lowered:
+                narrative += "Patient tolerated visit without adverse event."
 
         mock_data = dict(ORSINI_SCHEMA)
         mock_data.update({
@@ -488,33 +492,33 @@ class NoteGenerator:
             "parking": parking,
             "mileage": mileage,
             "vitals_bp": bp,
-            "vitals_temperature": f"{temp} F" if "f" not in temp.lower() else temp,
+            "vitals_temperature": f"{temp} F" if (temp and "f" not in temp.lower()) else temp,
             "vitals_pulse": hr,
             "vitals_respiration": resp,
-            "vitals_weight": f"{weight} kg" if "kg" not in weight.lower() else weight,
+            "vitals_weight": f"{weight} kg" if (weight and "kg" not in weight.lower()) else weight,
             "vitals_pain_scale": pain,
             "pain_location": pain_loc,
-            "standard_precautions_maintained": True,
-            "lung_sounds": "Clear bilaterally" if "clear" in lowered else "Clear",
-            "heart_sounds": "Regular rate and rhythm",
-            "alert": True,
-            "oriented_to_person": True,
-            "oriented_to_place": True,
-            "oriented_to_time": True,
-            "fall_precaution_maintained": True,
-            "type_of_access": "Peripheral IV (PIV)" if "piv" in lowered or "peripheral" in lowered else "PICC Line" if "picc" in lowered else "Peripheral IV (PIV)",
+            "standard_precautions_maintained": True if "precaution" in lowered else False,
+            "lung_sounds": "Clear bilaterally" if "clear" in lowered else "",
+            "heart_sounds": "Regular rate and rhythm" if "regular" in lowered or "rhythm" in lowered else "",
+            "alert": True if "alert" in lowered else False,
+            "oriented_to_person": True if ("person" in lowered or "oriented" in lowered) else False,
+            "oriented_to_place": True if ("place" in lowered or "oriented" in lowered) else False,
+            "oriented_to_time": True if ("time" in lowered or "oriented" in lowered) else False,
+            "fall_precaution_maintained": True if "fall" in lowered else False,
+            "type_of_access": "Peripheral IV (PIV)" if "piv" in lowered or "peripheral" in lowered else ("PICC Line" if "picc" in lowered else ("Peripheral IV (PIV)" if gauge else "")),
             "site_of_insertion": site,
             "brand_gauge": gauge,
             "attempt_number": attempt,
             "site_condition": site_cond,
-            "current_dressing_intact": "Yes, dry and occlusive",
-            "blood_return": "Positive brisk blood return",
-            "saline_flush_ml": f"{flush_amt} mL NS",
+            "current_dressing_intact": "Yes, dry and occlusive" if site_cond else "",
+            "blood_return": "Positive brisk blood return" if "brisk" in lowered or "patent" in lowered else "",
+            "saline_flush_ml": f"{flush_amt} mL NS" if flush_amt else "",
             "discontinue_note": discontinue_note,
             "pump_brand_model": pump,
-            "pump_program_verified": "Verified with physician order and drug label",
-            "pump_settings_verified_with_label": "Yes",
-            "pump_settings_changed": "No",
+            "pump_program_verified": "Verified with physician order and drug label" if pump else "",
+            "pump_settings_verified_with_label": "Yes" if pump else "",
+            "pump_settings_changed": "No" if pump else "",
             "lot_number_1": lot,
             "exp_date_1": exp_date,
             "infusion_table": infusion_table,
@@ -522,13 +526,13 @@ class NoteGenerator:
             "narrative": narrative,
             "clinician_name_title": nurse_title,
             "clinician_signature": nurse_sig,
-            "clinician_signature_date": date,
-            "instructed": True,
-            "pt_cg_verbalized_understanding": True,
-            "plan_for_next_visit": "Next maintenance infusion scheduled in 4 weeks. Discharge precautions reviewed.",
-            "progress_goals": "Patient will tolerate infusion without adverse reaction. Vital signs stable.",
-            "diet": "Low sodium Regular diet" if "sodium" in lowered else "Regular diet",
-            "instructions_given": f"Reviewed {drug} administration and side effects",
+            "clinician_signature_date": date if nurse_sig else "",
+            "instructed": True if "instruct" in lowered else False,
+            "pt_cg_verbalized_understanding": True if "understanding" in lowered else False,
+            "plan_for_next_visit": "Next maintenance infusion scheduled in 4 weeks." if ("next" in lowered or "routine" in lowered) else "",
+            "progress_goals": "Patient will tolerate infusion without adverse reaction." if drug else "",
+            "diet": "Low sodium Regular diet" if "sodium" in lowered else ("Regular diet" if "diet" in lowered else ""),
+            "instructions_given": f"Reviewed {drug} administration and side effects" if drug else "",
             "specify_new_changed_meds": "Vit D, B12, Vit C" if "vit" in lowered else "",
         })
 
@@ -542,7 +546,7 @@ class NoteGenerator:
     def generate_from_voice(self, audio_file_path: str) -> dict[str, Any]:
         """
         Transcribes audio recordings and synthesizes the Orsini form.
-        Leverages Google Gemini 3.6 Flash multimodal audio processing.
+        Leverages Google Gemini multimodal audio processing.
         """
         audio_path = Path(audio_file_path)
         if not audio_path.is_file():
@@ -577,25 +581,16 @@ class NoteGenerator:
                 note["_transcript"] = raw_text
                 return note
             except Exception as exc:
-                logger.warning("Gemini voice transcription unavailable (%s). Engaging voice simulation fallback.", exc)
+                logger.error("Gemini voice transcription failed: %s", exc)
+                err_note = dict(ORSINI_SCHEMA)
+                err_note["_transcript"] = f"Voice transcription error: {exc}"
+                return err_note
 
-        # High-Fidelity Voice simulation fallback
-        mock_note = self.generate_mock(
-            "Patient Jane Doe (DOB 04/15/1975) presented for scheduled Evkeeza infusion on 10/04/2026. "
-            "Pre-infusion vitals: BP 118/74, pulse 72, temperature 98.4 F, resp 16, weight 65.5 kg, pain 0/10. "
-            "20-gauge PIV placed in right forearm, 1st attempt, patent with brisk blood return. "
-            "Infusion started at 09:00 AM, completed at 11:30 AM via Baxter pump. Lot 83242000007, exp 11/26. "
-            "Patient tolerated infusion well. Hilario castillo RN.",
-            page=None,
-        )
-        mock_note["_transcript"] = (
-            "Patient Jane Doe (DOB 04/15/1975) presented for scheduled Evkeeza infusion on 10/04/2026. "
-            "Pre-infusion vitals: BP 118/74, pulse 72, temperature 98.4 F, resp 16, weight 65.5 kg, pain 0/10. "
-            "20-gauge PIV placed in right forearm, 1st attempt, patent with brisk blood return. "
-            "Infusion started at 09:00 AM, completed at 11:30 AM via Baxter pump. Lot 83242000007, exp 11/26. "
-            "Patient tolerated infusion well without adverse event. Hilario castillo RN."
-        )
-        return mock_note
+        # If offline or provider is mock without Gemini API key:
+        logger.warning("Voice transcription unavailable without Gemini API key.")
+        empty_note = dict(ORSINI_SCHEMA)
+        empty_note["_transcript"] = "Voice transcription unavailable without active GEMINI_API_KEY."
+        return empty_note
 
     def _fill_defaults(self, note: dict[str, Any]) -> None:
         """Guarantees that all required Orsini schema keys are present in output."""

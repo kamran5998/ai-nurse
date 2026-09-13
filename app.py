@@ -182,14 +182,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-DEFAULT_SAMPLE_DICTATION = (
-    "Patient Jane smite (DOB 04/05/1988) presented on 09/11/2025 for scheduled IVIG infusion. "
-    "Pre-infusion vitals: BP 118/74, pulse 72, temperature 98.4 F, resp 16, weight 65.5 kg, pain 0/10. "
-    "20-gauge PIV placed in right forearm, 2nd attempt, patent with brisk blood return. "
-    "Infusion started at 09:00 AM, completed at 11:30 AM via Baxter pump. Lot 99281726, exp 05/26. "
-    "Flushed with 10 mL NS. Patient tolerated infusion well without adverse event. Nurse Sarah Connor RN."
-)
-
 nlp = MedicalNLP()
 
 
@@ -317,30 +309,31 @@ def main() -> None:
 
     if process_btn:
         active_pdf = st.session_state.get("active_pdf_path")
+        active_audio_path = st.session_state.get("active_audio")
+
         if not active_pdf or not os.path.exists(active_pdf):
             st.warning("⚠️ Please upload a blank PDF template in Step 1 first before auto-filling!")
+        elif not active_audio_path or not os.path.exists(active_audio_path):
+            st.warning("⚠️ Please record your voice dictation in Step 2 before auto-filling!")
         else:
             with st.spinner("Processing voice dictation and populating Orsini PDF..."):
-                active_audio_path = st.session_state.get("active_audio")
-                active_dictation = ""
-                if active_audio_path and os.path.exists(active_audio_path):
-                    voice_res = gen.generate_from_voice(active_audio_path)
-                    active_dictation = voice_res.get("_transcript", "")
+                voice_res = gen.generate_from_voice(active_audio_path)
+                active_dictation = voice_res.get("_transcript", "").strip()
 
-                if not active_dictation:
-                    active_dictation = DEFAULT_SAMPLE_DICTATION
+                if not active_dictation or active_dictation.startswith("Voice transcription error") or active_dictation.startswith("Voice transcription unavailable"):
+                    st.error(f"⚠️ Could not transcribe voice: {active_dictation or 'Empty audio recording'}")
+                else:
+                    # Generate structured note strictly from actual spoken input
+                    is_mock = (provider_choice == "mock")
+                    note_result = gen.generate(active_dictation, mock=is_mock)
+                    st.session_state["note_result"] = note_result
 
-                # Generate structured note
-                is_mock = (provider_choice == "mock")
-                note_result = gen.generate(active_dictation, mock=is_mock)
-                st.session_state["note_result"] = note_result
-
-                # Fill into the uploaded PDF template
-                custom_filler = OrsiniPDFFiller(template_path=active_pdf)
-                pdf_bytes = custom_filler.fill_form(note_result)
-                st.session_state["filled_pdf_bytes"] = pdf_bytes
-                st.session_state["filled_pdf_previews"] = custom_filler.render_preview_images(pdf_bytes)
-                st.rerun()
+                    # Fill into the uploaded PDF template
+                    custom_filler = OrsiniPDFFiller(template_path=active_pdf)
+                    pdf_bytes = custom_filler.fill_form(note_result)
+                    st.session_state["filled_pdf_bytes"] = pdf_bytes
+                    st.session_state["filled_pdf_previews"] = custom_filler.render_preview_images(pdf_bytes)
+                    st.rerun()
 
     st.markdown("---")
 
