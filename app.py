@@ -214,9 +214,9 @@ def main() -> None:
     # Header section
     st.markdown('<div class="main-title">🩺 AI Nurse Documentation Assistant</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="sub-title">1. Upload a blank PDF template &nbsp;|&nbsp; '
+        '<div class="sub-title">1. Choose a PDF (Load Blank Template or Upload Existing Patient PDF to Edit) &nbsp;|&nbsp; '
         '2. Dictate visit observations via voice &nbsp;|&nbsp; '
-        '3. AI auto-fills & downloads the completed official 4-page Orsini PDF</div>',
+        '3. AI auto-fills / updates & downloads the completed official 4-page Orsini PDF</div>',
         unsafe_allow_html=True,
     )
 
@@ -226,43 +226,84 @@ def main() -> None:
     col_p1, col_p2 = st.columns([1, 1], gap="medium")
 
     with col_p1:
-        st.markdown("#### 📄 Step 1: Upload Blank PDF Template")
-        st.caption("Upload your blank Orsini clinical PDF (no data filled).")
+        st.markdown("#### 📄 Step 1: Select or Upload PDF Form")
+        st.caption("Upload a patient's existing PDF to edit, or load the blank template for a new visit.")
         uploaded_pdf = st.file_uploader(
-            "Choose a blank PDF template:",
+            "Choose a PDF:",
             type=["pdf"],
-            key="blank_pdf_uploader_widget",
-            help="Upload a blank Orsini Nursing Form PDF template to be filled.",
+            key="pdf_uploader_widget",
+            help="Upload an existing patient PDF to edit or load a template.",
         )
 
-        st.caption("Or load the standard blank template with 1 click:")
-        if st.button("📄 Load Official Blank Orsini Template", key="load_blank_template_btn", use_container_width=True):
+        col_b1, col_b2 = st.columns(2, gap="small")
+        with col_b1:
+            load_uploaded_btn = st.button(
+                "📂 Load Uploaded PDF",
+                key="load_uploaded_pdf_btn",
+                use_container_width=True,
+                help="Load the uploaded PDF above to edit or update an existing patient report.",
+            )
+        with col_b2:
+            load_blank_btn = st.button(
+                "📄 Load Blank PDF Template",
+                key="load_blank_template_btn",
+                use_container_width=True,
+                help="Load the official blank template to document a brand new patient visit.",
+            )
+
+        if load_blank_btn:
             if blank_template_path.exists():
                 st.session_state["active_pdf_path"] = str(blank_template_path)
-                st.session_state["active_pdf_name"] = "orsini_blank_template.pdf (Official Blank Form)"
+                st.session_state["active_pdf_name"] = "Official Blank Orsini Template (orsini_blank_template.pdf)"
+                st.session_state["is_edit_mode"] = False
+                st.session_state["pdf_baseline_data"] = {}
                 st.session_state.pop("filled_pdf_bytes", None)
                 st.session_state.pop("filled_pdf_previews", None)
                 with open(blank_template_path, "rb") as f:
                     st.session_state["uploaded_pdf_previews"] = filler.render_preview_images(f.read())
                 st.rerun()
 
-        if uploaded_pdf is not None:
+        if load_uploaded_btn:
+            if uploaded_pdf is not None:
+                pdf_save_path = PROJECT_ROOT / f"uploaded_{uploaded_pdf.name}"
+                file_bytes = uploaded_pdf.getvalue()
+                with open(pdf_save_path, "wb") as f:
+                    f.write(file_bytes)
+
+                extracted_data = pdf_processor.extract_from_pdf(file_bytes)
+                st.session_state["active_pdf_path"] = str(pdf_save_path)
+                st.session_state["active_pdf_name"] = f"Uploaded PDF: {uploaded_pdf.name}"
+                st.session_state["is_edit_mode"] = True
+                st.session_state["pdf_baseline_data"] = extracted_data
+                st.session_state.pop("filled_pdf_bytes", None)
+                st.session_state.pop("filled_pdf_previews", None)
+                st.session_state["uploaded_pdf_previews"] = filler.render_preview_images(file_bytes)
+                st.rerun()
+            else:
+                st.warning("⚠️ Please choose a PDF file above first before clicking 'Load Uploaded PDF'.")
+
+        # Auto-load when a new file is chosen in uploader
+        if uploaded_pdf is not None and st.session_state.get("last_uploaded_name") != uploaded_pdf.name:
+            st.session_state["last_uploaded_name"] = uploaded_pdf.name
             pdf_save_path = PROJECT_ROOT / f"uploaded_{uploaded_pdf.name}"
             file_bytes = uploaded_pdf.getvalue()
             with open(pdf_save_path, "wb") as f:
                 f.write(file_bytes)
 
-            if st.session_state.get("active_pdf_path") != str(pdf_save_path):
-                st.session_state["active_pdf_path"] = str(pdf_save_path)
-                st.session_state["active_pdf_name"] = uploaded_pdf.name
-                st.session_state.pop("filled_pdf_bytes", None)
-                st.session_state.pop("filled_pdf_previews", None)
-                st.session_state["uploaded_pdf_previews"] = filler.render_preview_images(file_bytes)
-                st.rerun()
+            extracted_data = pdf_processor.extract_from_pdf(file_bytes)
+            st.session_state["active_pdf_path"] = str(pdf_save_path)
+            st.session_state["active_pdf_name"] = f"Uploaded PDF: {uploaded_pdf.name}"
+            st.session_state["is_edit_mode"] = True
+            st.session_state["pdf_baseline_data"] = extracted_data
+            st.session_state.pop("filled_pdf_bytes", None)
+            st.session_state.pop("filled_pdf_previews", None)
+            st.session_state["uploaded_pdf_previews"] = filler.render_preview_images(file_bytes)
+            st.rerun()
 
         active_pdf = st.session_state.get("active_pdf_path")
         if active_pdf and os.path.exists(active_pdf):
-            st.success(f"**Loaded PDF:** {st.session_state.get('active_pdf_name')}")
+            mode_tag = " (✏️ Edit Mode)" if st.session_state.get("is_edit_mode") else " (📄 Blank Template Mode)"
+            st.success(f"**Loaded PDF:** {st.session_state.get('active_pdf_name')}{mode_tag}")
             if "uploaded_pdf_previews" not in st.session_state:
                 with open(active_pdf, "rb") as f:
                     st.session_state["uploaded_pdf_previews"] = filler.render_preview_images(f.read())
@@ -308,10 +349,10 @@ def main() -> None:
     st.markdown("<br>", unsafe_allow_html=True)
 
     # -----------------------------------------------------------------------
-    # Step 3: Process Voice & Auto-Fill Blank PDF
+    # Step 3: Process Voice & Auto-Fill / Update PDF
     # -----------------------------------------------------------------------
     process_btn = st.button(
-        "✨ Process Voice Dictation & Auto-Fill Blank PDF",
+        "✨ Process Voice Dictation & Auto-Fill / Update PDF",
         type="primary",
         use_container_width=True,
         key="process_autofill_btn",
@@ -321,11 +362,11 @@ def main() -> None:
         active_pdf = st.session_state.get("active_pdf_path")
         active_audio_path = st.session_state.get("active_audio")
         if not active_pdf or not os.path.exists(active_pdf):
-            st.warning("⚠️ Please upload a blank PDF template in Step 1 first before auto-filling!")
+            st.warning("⚠️ Please load a PDF (uploaded or blank template) in Step 1 first before processing!")
         elif not active_audio_path or not os.path.exists(active_audio_path):
-            st.warning("⚠️ Please record voice dictation or upload an audio file in Step 2 before auto-filling!")
+            st.warning("⚠️ Please record voice dictation or upload an audio file in Step 2 before processing!")
         else:
-            with st.spinner("Processing voice dictation and populating Orsini PDF..."):
+            with st.spinner("Processing voice dictation and compiling Orsini PDF..."):
                 active_audio_path = st.session_state.get("active_audio")
                 if active_audio_path and os.path.exists(active_audio_path):
                     voice_res = gen.generate_from_voice(active_audio_path)
@@ -338,11 +379,20 @@ def main() -> None:
                 # Generate structured note with strict 1:1 clinical fidelity
                 is_mock = (provider_choice == "mock")
                 note_result = gen.generate(active_dictation, mock=is_mock)
-                st.session_state["note_result"] = note_result
 
-                # Fill into the uploaded PDF template
-                custom_filler = OrsiniPDFFiller(template_path=active_pdf)
-                pdf_bytes = custom_filler.fill_form(note_result)
+                # If editing an existing uploaded patient PDF, merge baseline data with voice updates
+                baseline_data = st.session_state.get("pdf_baseline_data") or {}
+                if st.session_state.get("is_edit_mode") and baseline_data:
+                    final_data = merge_clinical_data(baseline_data, note_result)
+                else:
+                    final_data = note_result
+
+                st.session_state["note_result"] = final_data
+
+                # Fill into PDF template
+                target_template = blank_template_path if (st.session_state.get("is_edit_mode") and blank_template_path.exists()) else active_pdf
+                custom_filler = OrsiniPDFFiller(template_path=target_template)
+                pdf_bytes = custom_filler.fill_form(final_data)
                 st.session_state["filled_pdf_bytes"] = pdf_bytes
                 st.session_state["filled_pdf_previews"] = custom_filler.render_preview_images(pdf_bytes)
                 st.rerun()

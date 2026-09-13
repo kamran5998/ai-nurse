@@ -43,50 +43,53 @@ def merge_clinical_data(
             merged[k] = v
 
     # 3. Specific clinical field synchronizations
-    # Ensure patient name is title cased and valid
     p_name = nurse_updates.get("patient_name") or pdf_baseline.get("patient_name")
-    if p_name and p_name.lower() not in ("name", "the", "a", "unknown", ""):
-        merged["patient_name"] = str(p_name).title()
-    elif not merged.get("patient_name"):
-        merged["patient_name"] = "Jane Doe"
+    if p_name and str(p_name).strip().lower() not in ("name", "the", "a", "unknown", ""):
+        merged["patient_name"] = str(p_name).strip().title()
 
     # Drug name
-    drug = nurse_updates.get("drug_name") or pdf_baseline.get("drug_name") or "Evkeeza"
-    merged["drug_name"] = drug
+    drug = nurse_updates.get("drug_name") or pdf_baseline.get("drug_name") or ""
+    if drug:
+        merged["drug_name"] = drug
 
     # Dates and times
-    merged["date"] = nurse_updates.get("date") or pdf_baseline.get("date") or "10/04/2026"
-    merged["dob"] = nurse_updates.get("dob") or pdf_baseline.get("dob") or "04/15/1975"
-    merged["time_in"] = nurse_updates.get("time_in") or pdf_baseline.get("time_in") or "09:00 AM"
-    merged["time_out"] = nurse_updates.get("time_out") or pdf_baseline.get("time_out") or "11:30 AM"
+    if nurse_updates.get("date") or pdf_baseline.get("date"):
+        merged["date"] = nurse_updates.get("date") or pdf_baseline.get("date")
+    if nurse_updates.get("dob") or pdf_baseline.get("dob"):
+        merged["dob"] = nurse_updates.get("dob") or pdf_baseline.get("dob")
+    if nurse_updates.get("time_in") or pdf_baseline.get("time_in"):
+        merged["time_in"] = nurse_updates.get("time_in") or pdf_baseline.get("time_in")
+    if nurse_updates.get("time_out") or pdf_baseline.get("time_out"):
+        merged["time_out"] = nurse_updates.get("time_out") or pdf_baseline.get("time_out")
 
     # Vitals
-    merged["vitals_bp"] = nurse_updates.get("vitals_bp") or pdf_baseline.get("vitals_bp") or "118/74"
-    merged["vitals_pulse"] = nurse_updates.get("vitals_pulse") or pdf_baseline.get("vitals_pulse") or "72"
-    merged["vitals_temperature"] = nurse_updates.get("vitals_temperature") or pdf_baseline.get("vitals_temperature") or "98.4 F"
-    merged["vitals_respiration"] = nurse_updates.get("vitals_respiration") or pdf_baseline.get("vitals_respiration") or "16"
-    merged["vitals_pain_scale"] = nurse_updates.get("vitals_pain_scale") or pdf_baseline.get("vitals_pain_scale") or "0"
+    for v_field in ("vitals_bp", "vitals_pulse", "vitals_temperature", "vitals_respiration", "vitals_pain_scale", "vitals_weight", "pain_location"):
+        val = nurse_updates.get(v_field) or pdf_baseline.get(v_field)
+        if val:
+            merged[v_field] = val
 
     # Catheter & Pump
-    merged["site_of_insertion"] = nurse_updates.get("site_of_insertion") or pdf_baseline.get("site_of_insertion") or "Right forearm"
-    merged["brand_gauge"] = nurse_updates.get("brand_gauge") or pdf_baseline.get("brand_gauge") or "Angiocath 20G"
-    merged["pump_brand_model"] = nurse_updates.get("pump_brand_model") or pdf_baseline.get("pump_brand_model") or "Baxter Pump"
-    merged["saline_flush_ml"] = nurse_updates.get("saline_flush_ml") or pdf_baseline.get("saline_flush_ml") or "10 mL NS"
-
-    # Lots & Expiration
-    merged["lot_number_1"] = nurse_updates.get("lot_number_1") or pdf_baseline.get("lot_number_1") or "83242000007"
-    merged["exp_date_1"] = nurse_updates.get("exp_date_1") or pdf_baseline.get("exp_date_1") or "11/26"
+    for c_field in ("site_of_insertion", "brand_gauge", "attempt_number", "site_condition", "pump_brand_model", "saline_flush_ml", "lot_number_1", "exp_date_1"):
+        val = nurse_updates.get(c_field) or pdf_baseline.get(c_field)
+        if val:
+            merged[c_field] = val
 
     # Signatures
-    nurse_sig = nurse_updates.get("clinician_signature") or pdf_baseline.get("clinician_signature") or "Hilario castillo RN"
-    merged["clinician_signature"] = nurse_sig
-    merged["clinician_name_title"] = nurse_sig if "BSN" in nurse_sig else f"{nurse_sig}, BSN"
-    merged["clinician_signature_date"] = merged["date"]
+    nurse_sig = nurse_updates.get("clinician_signature") or pdf_baseline.get("clinician_signature") or ""
+    if nurse_sig:
+        merged["clinician_signature"] = nurse_sig
+        merged["clinician_name_title"] = nurse_updates.get("clinician_name_title") or pdf_baseline.get("clinician_name_title") or (nurse_sig if "BSN" in nurse_sig else f"{nurse_sig}, BSN")
+        merged["clinician_signature_date"] = merged.get("date", "")
 
     # Flow sheet & Infusion table synchronization
     if nurse_updates.get("vitals_flow_sheet"):
         merged["vitals_flow_sheet"] = nurse_updates["vitals_flow_sheet"]
+    elif pdf_baseline.get("vitals_flow_sheet"):
+        merged["vitals_flow_sheet"] = pdf_baseline["vitals_flow_sheet"]
+
     if nurse_updates.get("infusion_table"):
         merged["infusion_table"] = nurse_updates["infusion_table"]
+    elif pdf_baseline.get("infusion_table"):
+        merged["infusion_table"] = pdf_baseline["infusion_table"]
 
     return merged

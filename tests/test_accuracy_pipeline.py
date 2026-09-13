@@ -62,6 +62,42 @@ class TestAccuracyPipeline(unittest.TestCase):
         self.assertNotIn('Hilario castillo', doc[3].get_text())
         doc.close()
 
+    def test_edit_existing_patient_pdf_preserves_baseline_and_applies_updates(self):
+        import fitz
+        # 1. Simulate existing patient record from 1 month ago
+        old_patient_record = {
+            'patient_name': 'John Abraham',
+            'dob': '04/05/1988',
+            'drug_name': 'IVIG',
+            'date': '08/11/2025',
+            'vitals_bp': '118/74',
+        }
+        # 2. Simulate new nurse voice updates 1 month later
+        gen = NoteGenerator(provider='mock')
+        nurse_update = gen.generate('Date of visit 09/11/2025, BP 124/82, pulse 76', mock=True)
+
+        # 3. Merge baseline data with updates
+        merged = merge_clinical_data(old_patient_record, nurse_update)
+        self.assertEqual(merged['patient_name'], 'John Abraham')
+        self.assertEqual(merged['dob'], '04/05/1988')
+        self.assertEqual(merged['drug_name'], 'IVIG')
+        self.assertEqual(merged['date'], '09/11/2025')
+        self.assertEqual(merged['vitals_bp'], '124/82')
+        self.assertEqual(merged['vitals_pulse'], '76')
+
+        filler = OrsiniPDFFiller('templates/orsini_blank_template.pdf')
+        pdf_bytes = filler.fill_form(merged)
+
+        doc = fitz.open(stream=pdf_bytes, filetype='pdf')
+        text = doc[0].get_text()
+        self.assertIn('John Abraham', text)
+        self.assertIn('04/05/1988', text)
+        self.assertIn('IVIG', text)
+        self.assertIn('09/11/2025', text)
+        self.assertIn('124/82', text)
+        self.assertIn('76', text)
+        doc.close()
+
 
 if __name__ == '__main__':
     unittest.main()
