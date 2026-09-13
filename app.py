@@ -277,7 +277,7 @@ def main() -> None:
 
     with col_p2:
         st.markdown("#### 🎙️ Step 2: Nurse Voice Dictation")
-        st.caption("Speak all patient, vitals, medication, and IV details via microphone.")
+        st.caption("Record live voice via microphone or upload an existing audio file.")
         mic_audio = st.audio_input(
             "Record voice dictation via microphone:",
             key="live_mic_widget",
@@ -290,6 +290,23 @@ def main() -> None:
                 f.write(mic_audio.getbuffer())
             st.session_state["active_audio"] = str(mic_file_path)
             st.session_state["audio_source_name"] = "Live Microphone Recording (mic.wav)"
+
+        st.caption("Or upload pre-recorded audio file (if you already have one):")
+        uploaded_audio = st.file_uploader(
+            "Choose an audio file (WAV, MP3, M4A, OGG):",
+            type=["wav", "mp3", "m4a", "ogg", "webm"],
+            key="audio_file_uploader_widget",
+            help="Upload an existing voice recording file if already available.",
+        )
+
+        if uploaded_audio is not None:
+            audio_save_path = PROJECT_ROOT / f"uploaded_{uploaded_audio.name}"
+            with open(audio_save_path, "wb") as f:
+                f.write(uploaded_audio.getvalue())
+            if st.session_state.get("active_audio") != str(audio_save_path):
+                st.session_state["active_audio"] = str(audio_save_path)
+                st.session_state["audio_source_name"] = f"Uploaded Audio ({uploaded_audio.name})"
+                st.rerun()
 
         active_audio_path = st.session_state.get("active_audio")
         if active_audio_path and os.path.exists(active_audio_path):
@@ -314,7 +331,7 @@ def main() -> None:
         if not active_pdf or not os.path.exists(active_pdf):
             st.warning("⚠️ Please upload a blank PDF template in Step 1 first before auto-filling!")
         elif not active_audio_path or not os.path.exists(active_audio_path):
-            st.warning("⚠️ Please record voice dictation via microphone in Step 2 before auto-filling!")
+            st.warning("⚠️ Please record voice dictation or upload an audio file in Step 2 before auto-filling!")
         else:
             with st.spinner("Processing voice dictation and populating Orsini PDF..."):
                 active_audio_path = st.session_state.get("active_audio")
