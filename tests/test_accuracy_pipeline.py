@@ -32,5 +32,36 @@ class TestAccuracyPipeline(unittest.TestCase):
         previews = filler.render_preview_images(pdf_bytes)
         self.assertEqual(len(previews), 4)
 
+    def test_patient_name_only_leaves_all_other_fields_blank(self):
+        import fitz
+        gen = NoteGenerator(provider='mock')
+        note = gen.generate('Patient name John Abraham', mock=True)
+
+        self.assertEqual(note.get('patient_name'), 'John Abraham')
+        self.assertEqual(note.get('dob', ''), '')
+        self.assertEqual(note.get('date', ''), '')
+        self.assertEqual(note.get('drug_name', ''), '')
+        self.assertEqual(note.get('vitals_bp', ''), '')
+        self.assertEqual(note.get('pump_brand_model', ''), '')
+        self.assertEqual(note.get('lot_number_1', ''), '')
+        self.assertEqual(note.get('clinician_signature', ''), '')
+
+        filler = OrsiniPDFFiller('templates/orsini_blank_template.pdf')
+        pdf_bytes = filler.fill_form(note)
+
+        doc = fitz.open(stream=pdf_bytes, filetype='pdf')
+        # Patient name must appear
+        self.assertIn('John Abraham', doc[0].get_text())
+        # Unmentioned data must NOT appear
+        self.assertNotIn('Jane Doe', doc[0].get_text())
+        self.assertNotIn('Evkeeza', doc[0].get_text())
+        self.assertNotIn('118/74', doc[0].get_text())
+        self.assertNotIn('107/66', doc[0].get_text())
+        self.assertNotIn('Curlin', doc[1].get_text())
+        self.assertNotIn('83242000007', doc[2].get_text())
+        self.assertNotIn('Hilario castillo', doc[3].get_text())
+        doc.close()
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -182,14 +182,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-DEFAULT_SAMPLE_DICTATION = (
-    "Patient Jane smite (DOB 04/05/1988) presented on 09/11/2025 for scheduled IVIG infusion. "
-    "Pre-infusion vitals: BP 118/74, pulse 72, temperature 98.4 F, resp 16, weight 65.5 kg, pain 0/10. "
-    "20-gauge PIV placed in right forearm, 2nd attempt, patent with brisk blood return. "
-    "Infusion started at 09:00 AM, completed at 11:30 AM via Baxter pump. Lot 99281726, exp 05/26. "
-    "Flushed with 10 mL NS. Patient tolerated infusion well without adverse event. Nurse Sarah Connor RN."
-)
-
 nlp = MedicalNLP()
 
 
@@ -335,15 +327,15 @@ def main() -> None:
         else:
             with st.spinner("Processing voice dictation and populating Orsini PDF..."):
                 active_audio_path = st.session_state.get("active_audio")
-                active_dictation = ""
                 if active_audio_path and os.path.exists(active_audio_path):
                     voice_res = gen.generate_from_voice(active_audio_path)
-                    active_dictation = voice_res.get("_transcript", "")
+                    active_dictation = voice_res.get("_transcript", "").strip()
 
                 if not active_dictation:
-                    active_dictation = DEFAULT_SAMPLE_DICTATION
+                    st.error("⚠️ No clear clinical speech was recognized from the audio. Please record or upload a clear voice recording.")
+                    st.stop()
 
-                # Generate structured note
+                # Generate structured note with strict 1:1 clinical fidelity
                 is_mock = (provider_choice == "mock")
                 note_result = gen.generate(active_dictation, mock=is_mock)
                 st.session_state["note_result"] = note_result
