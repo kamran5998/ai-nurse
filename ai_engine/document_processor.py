@@ -167,7 +167,7 @@ class DocumentProcessor:
             result = _sanitize_json_response(response.text)
         else:
             result = dict(schema)
-            result["patient_name"] = ""
+            result["patient_name"] = "Jane Doe"
             result["_raw_text"] = "Scanned Orsini form processed in simulation mode."
 
         # Scrub PHI from raw extracted OCR text to ensure HIPAA compliance

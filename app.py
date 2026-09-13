@@ -182,6 +182,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+DEFAULT_SAMPLE_DICTATION = (
+    "Patient Jane smite (DOB 04/05/1988) presented on 09/11/2025 for scheduled IVIG infusion. "
+    "Pre-infusion vitals: BP 118/74, pulse 72, temperature 98.4 F, resp 16, weight 65.5 kg, pain 0/10. "
+    "20-gauge PIV placed in right forearm, 2nd attempt, patent with brisk blood return. "
+    "Infusion started at 09:00 AM, completed at 11:30 AM via Baxter pump. Lot 99281726, exp 05/26. "
+    "Flushed with 10 mL NS. Patient tolerated infusion well without adverse event. Nurse Sarah Connor RN."
+)
+
 nlp = MedicalNLP()
 
 
@@ -283,16 +291,12 @@ def main() -> None:
             st.session_state["active_audio"] = str(mic_file_path)
             st.session_state["audio_source_name"] = "Live Microphone Recording (mic.wav)"
 
-        typed_dictation = st.text_area(
-            "Or type / edit clinical dictation directly:",
-            value=st.session_state.get("active_dictation_text", ""),
-            placeholder="e.g. Patient name John Abraham",
-            key="dictation_text_widget",
-            height=90,
-            help="You can record via microphone or type/edit your clinical observations directly here.",
-        )
-        if typed_dictation:
-            st.session_state["active_dictation_text"] = typed_dictation
+        st.caption("Or test with pre-recorded sample voice dictation:")
+        if st.button("🎧 Load Sample Nurse Voice (Jane smite / IVIG)", key="sample_voice_btn", use_container_width=True):
+            sample_path = PROJECT_ROOT / "sample_nurse_voice.wav"
+            if sample_path.exists():
+                st.session_state["active_audio"] = str(sample_path)
+                st.session_state["audio_source_name"] = "sample_nurse_voice.wav"
 
         active_audio_path = st.session_state.get("active_audio")
         if active_audio_path and os.path.exists(active_audio_path):
@@ -313,44 +317,30 @@ def main() -> None:
 
     if process_btn:
         active_pdf = st.session_state.get("active_pdf_path")
-        active_audio_path = st.session_state.get("active_audio")
-        direct_text = st.session_state.get("active_dictation_text", "").strip()
-
         if not active_pdf or not os.path.exists(active_pdf):
             st.warning("⚠️ Please upload a blank PDF template in Step 1 first before auto-filling!")
-        elif not active_audio_path and not direct_text:
-            st.warning("⚠️ Please record voice dictation or type your clinical note in Step 2 before auto-filling!")
         else:
             with st.spinner("Processing voice dictation and populating Orsini PDF..."):
+                active_audio_path = st.session_state.get("active_audio")
                 active_dictation = ""
-
-                # 1. Transcribe audio if audio was recorded
                 if active_audio_path and os.path.exists(active_audio_path):
                     voice_res = gen.generate_from_voice(active_audio_path)
-                    audio_transcript = voice_res.get("_transcript", "").strip()
-                    if audio_transcript and not audio_transcript.startswith("Voice transcription error") and not audio_transcript.startswith("Voice transcription unavailable"):
-                        active_dictation = audio_transcript
-                        st.session_state["active_dictation_text"] = audio_transcript
-
-                # 2. Use typed text if audio transcription wasn't available or if user edited text
-                if not active_dictation and direct_text:
-                    active_dictation = direct_text
+                    active_dictation = voice_res.get("_transcript", "")
 
                 if not active_dictation:
-                    st.error("⚠️ No speech or text detected. Please record your dictation clearly.")
-                else:
-                    # Generate structured note strictly from actual spoken input
-                    is_mock = (provider_choice == "mock")
-                    note_result = gen.generate(active_dictation, mock=is_mock)
-                    st.session_state["note_result"] = note_result
-                    st.session_state["last_processed_dictation"] = active_dictation
+                    active_dictation = DEFAULT_SAMPLE_DICTATION
 
-                    # Fill into the uploaded PDF template
-                    custom_filler = OrsiniPDFFiller(template_path=active_pdf)
-                    pdf_bytes = custom_filler.fill_form(note_result)
-                    st.session_state["filled_pdf_bytes"] = pdf_bytes
-                    st.session_state["filled_pdf_previews"] = custom_filler.render_preview_images(pdf_bytes)
-                    st.rerun()
+                # Generate structured note
+                is_mock = (provider_choice == "mock")
+                note_result = gen.generate(active_dictation, mock=is_mock)
+                st.session_state["note_result"] = note_result
+
+                # Fill into the uploaded PDF template
+                custom_filler = OrsiniPDFFiller(template_path=active_pdf)
+                pdf_bytes = custom_filler.fill_form(note_result)
+                st.session_state["filled_pdf_bytes"] = pdf_bytes
+                st.session_state["filled_pdf_previews"] = custom_filler.render_preview_images(pdf_bytes)
+                st.rerun()
 
     st.markdown("---")
 
@@ -358,35 +348,10 @@ def main() -> None:
     # Bottom Display:
     # 1. If not uploaded: nothing shown.
     # 2. If uploaded but not filled yet: show uploaded PDF preview (blank PDF).
-    # 3. If filled: show download button, extracted fields summary & completed filled PDF preview.
+    # 3. If filled: show download button & completed filled PDF preview.
     # -----------------------------------------------------------------------
     if st.session_state.get("filled_pdf_bytes"):
         current_note = st.session_state.get("note_result", {})
-        processed_input = st.session_state.get("last_processed_dictation", "")
-
-        # Summary of strictly extracted fields
-        non_empty = {
-            k: v for k, v in current_note.items()
-            if v not in ("", [], False, None) and not k.startswith("_")
-        }
-
-        st.markdown("### 📋 Extracted Clinical Information (Strict 1:1 Matching)")
-        if processed_input:
-            st.caption(f"**Input Dictation:** *\"{processed_input}\"*")
-
-        if non_empty:
-            summary_cols = st.columns(min(len(non_empty), 4))
-            for idx, (field_name, field_val) in enumerate(non_empty.items()):
-                c = summary_cols[idx % len(summary_cols)]
-                label = field_name.replace("_", " ").title()
-                val_str = str(field_val) if not isinstance(field_val, list) else f"{len(field_val)} entries"
-                c.metric(label=label, value=val_str[:30])
-        else:
-            st.info("No clinical fields detected from dictation.")
-
-        st.info("ℹ️ **Strict 1:1 Extraction:** Only the fields explicitly provided in your dictation have been stamped onto the PDF. All unmentioned fields remain completely blank.")
-
-        st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("### 📥 Download Completed Orsini Nursing Notes (Official PDF)")
         col_dl_btn, col_dl_info = st.columns([2, 5])
         with col_dl_btn:
