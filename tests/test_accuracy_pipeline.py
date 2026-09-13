@@ -71,5 +71,27 @@ class TestAccuracyPipeline(unittest.TestCase):
         self.assertNotIn("Jane Doe", all_text)
         doc.close()
 
+    def test_strict_partial_inputs(self):
+        """Verifies that dictating partial info extracts strictly what was given and nothing else."""
+        gen = NoteGenerator(provider='mock')
+
+        # Test case A: Only patient name + BP
+        res_a = gen.generate("patient name john abraham, blood pressure 130/80", mock=True)
+        self.assertEqual(res_a['patient_name'], 'John Abraham')
+        self.assertEqual(res_a['vitals_bp'], '130/80')
+        self.assertEqual(res_a['drug_name'], '')
+        self.assertEqual(res_a['brand_gauge'], '')
+        self.assertEqual(res_a['pump_brand_model'], '')
+        self.assertEqual(res_a['lot_number_1'], '')
+
+        # Test case B: Only drug + gauge
+        res_b = gen.generate("medication Evkeeza, 20 gauge PIV placed in right forearm", mock=True)
+        self.assertEqual(res_b['patient_name'], '')
+        self.assertEqual(res_b['drug_name'], 'Evkeeza')
+        self.assertEqual(res_b['brand_gauge'], 'Angiocath 20G')
+        self.assertEqual(res_b['site_of_insertion'], 'Right Forearm')
+        self.assertEqual(res_b['vitals_bp'], '')
+        self.assertEqual(res_b['vitals_pulse'], '')
+
 if __name__ == '__main__':
     unittest.main()

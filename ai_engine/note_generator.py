@@ -40,19 +40,18 @@ _nlp = MedicalNLP()
 SYSTEM_PROMPT = """You are an expert clinical documentation assistant specializing in infusion nursing.
 You fill out the official Orsini Infusion Nursing Notes: Adult form (Form N-01-C17).
 
-Your primary goal is 100% CLINICAL ACCURACY:
-1. Patient Name: Extract the exact patient name (e.g., Jane smite, John Smith). Never use placeholder "Name" or "Unknown".
-2. Date of Birth (DOB): Extract verbatim in MM/DD/YYYY format.
-3. Medication / Drug Name: Extract the exact infusion drug (e.g., IVIG, Evkeeza, Infliximab, Remicade, Ceftriaxone).
-4. Vital Signs: Extract exact numbers for Blood Pressure (vitals_bp), Heart Rate (vitals_pulse), Temperature (vitals_temperature), Respiration (vitals_respiration), Weight (vitals_weight), and Pain Scale (vitals_pain_scale).
-5. Date & Times: Extract visit date, time_in, and time_out verbatim.
-6. Vascular Access: Extract catheter type (type_of_access), gauge (brand_gauge, e.g. 18G, 20G, 22G, 24G), insertion site (site_of_insertion, e.g. right forearm), and attempt number. NEVER confuse medication dose (like 10g) with catheter gauge!
-7. Infusion Pump: Extract pump brand and model (pump_brand_model, e.g. Baxter, Curlin, Alaris).
-8. Teaching & Lots: Extract lot numbers (lot_number_1) and expiration dates (exp_date_1).
-9. Signature: Extract clinician name and title (clinician_name_title, clinician_signature).
-10. Tables: Generate schema-compliant JSON arrays for infusion_table and vitals_flow_sheet.
-11. If both pre-existing PDF information and nurse spoken updates are provided, the nurse spoken updates MUST take 100% precedence for any fields mentioned.
-12. Output ONLY valid JSON matching the schema — never invent unmentioned data, leave unmentioned fields as "" or false.
+STRICT EXTRACTION RULES - 100% CLINICAL FIDELITY:
+1. Extract ONLY information that is explicitly stated or dictated in the clinical input.
+2. If the user provides ONLY a patient name (e.g. "patient name john abraham"), populate ONLY patient_name with title case (e.g. "John Abraham"). Leave ALL other string fields as empty strings "", all booleans as false, and all list fields (infusion_table, vitals_flow_sheet) as empty lists [].
+3. NEVER invent, assume, simulate, or default ANY field that was not mentioned in the user's input:
+   - Do NOT invent vitals (BP, pulse, temp, resp, weight, pain) unless spoken.
+   - Do NOT invent dates, times, drugs, lot numbers, or expiration dates unless spoken.
+   - Do NOT invent vascular access, gauges, pumps, or flushes unless spoken.
+   - Do NOT check any checkboxes (alert, oriented, precautions, etc.) unless explicitly stated in the input.
+   - Do NOT generate infusion_table or vitals_flow_sheet unless relevant medication or vitals were spoken.
+   - Do NOT generate narrative unless clinical observations or procedures were spoken.
+4. If a field was not mentioned in the input, it MUST be left empty ("" or false or []).
+5. Output ONLY valid JSON matching the ORSINI schema.
 """
 
 MONTH_MAP = {
@@ -143,6 +142,160 @@ def _generate_flow_sheet_times(time_in_str: str, time_out_str: str) -> list[str]
     return times
 
 
+def sanitize_note_to_spoken_input(note: dict[str, Any], raw_input: str) -> dict[str, Any]:
+    """
+    Enforces strict 1:1 clinical fidelity between nurse input and the structured note.
+    Guarantees that NO field is populated unless there is explicit evidence in raw_input.
+    """
+    lowered = raw_input.lower()
+
+    # 1. Patient Name: verify name exists in input
+    p_name = str(note.get("patient_name") or "").strip()
+    if p_name:
+        p_words = [w.lower() for w in p_name.split() if len(w) > 1 and w.lower() not in ("patient", "name", "mr", "mrs", "ms")]
+        if p_words and not any(w in lowered for w in p_words):
+            note["patient_name"] = ""
+        else:
+            note["patient_name"] = p_name.title()
+
+    # 2. DOB & Dates
+    dob = str(note.get("dob") or "").strip()
+    if dob:
+        dob_digits = "".join(filter(str.isdigit, dob))
+        has_month = any(m in lowered for m in ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])
+        if not (dob in raw_input or (dob_digits and dob_digits[:4] in "".join(filter(str.isdigit, raw_input))) or has_month):
+            note["dob"] = ""
+
+    date = str(note.get("date") or "").strip()
+    if date:
+        date_digits = "".join(filter(str.isdigit, date))
+        if not (date in raw_input or (date_digits and date_digits[:4] in "".join(filter(str.isdigit, raw_input)))):
+            note["date"] = ""
+
+    # 3. Times
+    for t_key in ("time_in", "time_out"):
+        t_val = str(note.get(t_key) or "").strip()
+        if t_val:
+            t_clean = "".join(filter(str.isdigit, t_val))
+            if not any(c.isdigit() for c in raw_input) or (t_clean and t_clean not in "".join(filter(str.isdigit, raw_input))):
+                note[t_key] = ""
+
+    # 4. Drug Name
+    drug = str(note.get("drug_name") or "").strip()
+    if drug:
+        d_words = [w.lower() for w in drug.split() if len(w) > 2 and w.lower() not in ("infusion", "medication", "drug", "solution")]
+        if d_words and not any(w in lowered for w in d_words):
+            note["drug_name"] = ""
+
+    # 5. Vitals
+    bp = str(note.get("vitals_bp") or "").strip()
+    if bp:
+        bp_digits = "".join(filter(str.isdigit, bp))
+        if not ("/" in raw_input or "bp" in lowered or "pressure" in lowered or (bp_digits and bp_digits in "".join(filter(str.isdigit, raw_input)))):
+            note["vitals_bp"] = ""
+
+    hr = str(note.get("vitals_pulse") or "").strip()
+    if hr:
+        if not any(k in lowered for k in ("pulse", "hr", "heart", "rate", "bpm")) and hr not in raw_input:
+            note["vitals_pulse"] = ""
+
+    temp = str(note.get("vitals_temperature") or "").strip()
+    if temp:
+        t_num = "".join(c for c in temp if c.isdigit() or c == ".")
+        if not ("temp" in lowered or "degree" in lowered or (t_num and t_num in raw_input)):
+            note["vitals_temperature"] = ""
+
+    resp = str(note.get("vitals_respiration") or "").strip()
+    if resp:
+        if not any(k in lowered for k in ("resp", "breath", "rr")) and resp not in raw_input:
+            note["vitals_respiration"] = ""
+
+    weight = str(note.get("vitals_weight") or "").strip()
+    if weight:
+        w_num = "".join(c for c in weight if c.isdigit() or c == ".")
+        if not any(k in lowered for k in ("weight", "wt", "kg", "lbs", "pound")) and (w_num and w_num not in raw_input):
+            note["vitals_weight"] = ""
+
+    pain = str(note.get("vitals_pain_scale") or "").strip()
+    if pain:
+        if "pain" not in lowered and pain not in raw_input:
+            note["vitals_pain_scale"] = ""
+
+    # 6. Catheter & Access
+    site = str(note.get("site_of_insertion") or "").strip()
+    if site:
+        s_words = [w.lower() for w in site.split() if len(w) > 2 and w.lower() not in ("site", "insertion")]
+        if s_words and not any(w in lowered for w in s_words):
+            note["site_of_insertion"] = ""
+
+    gauge = str(note.get("brand_gauge") or "").strip()
+    if gauge:
+        if not any(k in lowered for k in ("gauge", "ga", "piv", "catheter", "angio", "iv")) and not any(f"{g}g" in lowered for g in range(16, 28)):
+            note["brand_gauge"] = ""
+
+    pump = str(note.get("pump_brand_model") or "").strip()
+    if pump:
+        p_words = [w.lower() for w in pump.split() if len(w) > 2 and w.lower() not in ("pump", "brand", "model")]
+        if p_words and not any(w in lowered for w in p_words):
+            note["pump_brand_model"] = ""
+
+    lot = str(note.get("lot_number_1") or "").strip()
+    if lot:
+        if "lot" not in lowered and lot not in raw_input:
+            note["lot_number_1"] = ""
+
+    exp = str(note.get("exp_date_1") or "").strip()
+    if exp:
+        if not any(k in lowered for k in ("exp", "expiration")) and exp not in raw_input:
+            note["exp_date_1"] = ""
+
+    sig = str(note.get("clinician_signature") or "").strip()
+    if sig:
+        sig_words = [w.lower() for w in sig.split() if len(w) > 2 and w.lower() not in ("nurse", "rn", "bsn", "clinician", "signature")]
+        if sig_words and not any(w in lowered for w in sig_words):
+            note["clinician_signature"] = ""
+            note["clinician_name_title"] = ""
+            note["clinician_signature_date"] = ""
+
+    # 7. Tables: only allow if relevant observations exist
+    if not note.get("drug_name") and not ("flush" in lowered or "saline" in lowered):
+        note["infusion_table"] = []
+
+    if not (note.get("vitals_bp") or note.get("vitals_pulse") or note.get("vitals_temperature")):
+        note["vitals_flow_sheet"] = []
+
+    # 8. Checkboxes: only true if mentioned in text
+    checkbox_keywords = {
+        "alert": ["alert"],
+        "oriented_to_person": ["person", "oriented"],
+        "oriented_to_place": ["place", "oriented"],
+        "oriented_to_time": ["time", "oriented"],
+        "standard_precautions_maintained": ["precaution"],
+        "fall_precaution_maintained": ["fall"],
+        "instructed": ["instruct"],
+        "pt_cg_verbalized_understanding": ["understanding", "verbaliz"],
+        "therapy_admin_by_nurse": ["admin", "nurse"],
+    }
+    for cb_key, kws in checkbox_keywords.items():
+        if cb_key in note and note[cb_key]:
+            if not any(kw in lowered for kw in kws):
+                note[cb_key] = False
+
+    # 9. Narrative: only generate if clinical observations are actually present
+    has_clinical_obs = any([
+        note.get("drug_name"),
+        note.get("vitals_bp"),
+        note.get("vitals_pulse"),
+        note.get("site_of_insertion"),
+        note.get("pump_brand_model"),
+        "tolerated" in lowered,
+    ])
+    if not has_clinical_obs:
+        note["narrative"] = ""
+
+    return note
+
+
 class NoteGenerator:
     """
     Generates structured Orsini Infusion Nursing Documentation.
@@ -201,6 +354,7 @@ class NoteGenerator:
 
         note = self._call_llm(user_message)
         self._fill_defaults(note)
+        sanitize_note_to_spoken_input(note, raw_input)
         return note
 
     def generate_page(self, raw_input: str, page: int, mock: bool = False) -> dict[str, Any]:
@@ -535,6 +689,8 @@ class NoteGenerator:
             "instructions_given": f"Reviewed {drug} administration and side effects" if drug else "",
             "specify_new_changed_meds": "Vit D, B12, Vit C" if "vit" in lowered else "",
         })
+
+        sanitize_note_to_spoken_input(mock_data, raw_input)
 
         if page:
             page_schemas = {1: PAGE1_SCHEMA, 2: PAGE2_SCHEMA, 3: PAGE3_SCHEMA, 4: PAGE4_SCHEMA}
