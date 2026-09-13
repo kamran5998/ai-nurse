@@ -291,13 +291,6 @@ def main() -> None:
             st.session_state["active_audio"] = str(mic_file_path)
             st.session_state["audio_source_name"] = "Live Microphone Recording (mic.wav)"
 
-        st.caption("Or test with pre-recorded sample voice dictation:")
-        if st.button("🎧 Load Sample Nurse Voice (Jane smite / IVIG)", key="sample_voice_btn", use_container_width=True):
-            sample_path = PROJECT_ROOT / "sample_nurse_voice.wav"
-            if sample_path.exists():
-                st.session_state["active_audio"] = str(sample_path)
-                st.session_state["audio_source_name"] = "sample_nurse_voice.wav"
-
         active_audio_path = st.session_state.get("active_audio")
         if active_audio_path and os.path.exists(active_audio_path):
             st.success(f"**Loaded Audio:** {st.session_state.get('audio_source_name')}")
@@ -317,8 +310,11 @@ def main() -> None:
 
     if process_btn:
         active_pdf = st.session_state.get("active_pdf_path")
+        active_audio_path = st.session_state.get("active_audio")
         if not active_pdf or not os.path.exists(active_pdf):
             st.warning("⚠️ Please upload a blank PDF template in Step 1 first before auto-filling!")
+        elif not active_audio_path or not os.path.exists(active_audio_path):
+            st.warning("⚠️ Please record voice dictation via microphone in Step 2 before auto-filling!")
         else:
             with st.spinner("Processing voice dictation and populating Orsini PDF..."):
                 active_audio_path = st.session_state.get("active_audio")
